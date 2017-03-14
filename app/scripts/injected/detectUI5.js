@@ -8,8 +8,7 @@
     function createResponseToContentScript() {
         var responseToContentScript = Object.create(null);
         var responseToContentScriptBody;
-        var frameworkInfo;
-        var versionInfo;
+        var promise = Promise.resolve(responseToContentScript);
 
         responseToContentScript.detail = Object.create(null);
         responseToContentScriptBody = responseToContentScript.detail;
@@ -17,24 +16,23 @@
         if (window.sap && window.sap.ui) {
             responseToContentScriptBody.action = 'on-ui5-detected';
             responseToContentScriptBody.framework = Object.create(null);
+            responseToContentScriptBody.framework.version = '';
+            responseToContentScriptBody.framework.name = 'UI5';
 
-            // Get framework version
             try {
-                responseToContentScriptBody.framework.version = sap.ui.getVersionInfo().version;
+              promise = sap.ui.getVersionInfo({async:true}).then(
+                function(versionInfo) {
+                  var frameworkInfo = versionInfo.gav || versionInfo.name;
+                  responseToContentScriptBody.framework.version = versionInfo.version;
+                  responseToContentScriptBody.framework.name = frameworkInfo.indexOf('openui5') !== -1 ? 'OpenUI5' : 'SAPUI5';
+                  return responseToContentScript;
+                },
+                function() {
+                  return responseToContentScript;
+                }
+              );
             } catch (e) {
-                responseToContentScriptBody.framework.version = '';
-            }
-
-            // Get framework name
-            try {
-                versionInfo = sap.ui.getVersionInfo();
-
-                // Use group artifact version for maven builds or name for other builds (like SAPUI5-on-ABAP)
-                frameworkInfo = versionInfo.gav ? versionInfo.gav : versionInfo.name;
-
-                responseToContentScriptBody.framework.name = frameworkInfo.indexOf('openui5') !== -1 ? 'OpenUI5' : 'SAPUI5';
-            } catch (e) {
-                responseToContentScriptBody.framework.name = 'UI5';
+              // ignore
             }
 
             // Check if the version is supported
@@ -44,14 +42,19 @@
             responseToContentScriptBody.action = 'on-ui5-not-detected';
         }
 
-        return responseToContentScript;
+        return promise;
     }
 
-    // Send information to content script
-    document.dispatchEvent(new CustomEvent('detect-ui5-content', createResponseToContentScript()));
+    function createAndSendResponseToContentScript() {
+        // Send information to content script
+        createResponseToContentScript().then(function(response) {
+          console.log("detectUI5 response: %o", response);
+          document.dispatchEvent(new CustomEvent('detect-ui5-content', response));
+        });
+    }
 
+    createAndSendResponseToContentScript();
+    
     // Listens for event from injected script
-    document.addEventListener('do-ui5-detection-injected', function () {
-        document.dispatchEvent(new CustomEvent('detect-ui5-content', createResponseToContentScript()));
-    }, false);
+    document.addEventListener('do-ui5-detection-injected', createAndSendResponseToContentScript, false);
 }());
